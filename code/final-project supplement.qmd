@@ -1,0 +1,33 @@
+---
+format: pdf
+editor: visual
+---
+
+## Final Project: Supplemental Results
+
+This document shows additional figures described in the main report.
+
+**Appendix 1: Regional mortality rates (2020-2024)**
+
+![](../plots/app_regional_trend_plot.png)
+
+
+**Appendix 2: First Wave mortality rates**
+
+![](../plots/wave1_region.png)
+
+**Appendix 3: Second Wave mortality rates**
+
+![](../plots/wave2_region.png)
+
+**Appendix 4: Third Wave mortality rates**
+
+![](../plots/wave3_region.png)
+
+**Appendix 5: Fourth Wave mortality rates**
+
+![](../plots/wave4_region.png)
+
+**Appendix 6: Map of COVID mortality rates**
+
+![](../plots/map.png)

@@ -1,0 +1,321 @@
+---
+title: "COVID-19 Data Analysis"
+author: "Lisa Matay"
+date: 2024-17-12
+---
+
+**Data visualization generate some plots**
+
+Load data and packages
+
+```{r}
+library(ggplot2)
+library(httr2)
+library(tidyverse)
+library(janitor)
+library(stringr)
+library(jsonlite)
+library(purrr)
+library(lubridate)
+library(knitr)
+library(kableExtra)
+library(webshot)
+library(sf)
+library(cowplot)
+
+
+dat <- readRDS("../data/dat.rds")
+```
+
+**Figure 1**
+
+1.  Divide the pandemic period, January 2020 to December 2024 into *waves*. Justify your choice with data visualization.
+
+```         
+Trend plot for deaths (rates per 100,000) people
+```
+
+```{r}
+# Prepare data for plot
+dat_long <- dat %>%
+  mutate(
+         death_rate = (deaths / population) * 100000
+         )
+
+
+plot_1 <- ggplot(dat_long, aes(x = date, y = death_rate, 
+                               group = state,color = region_name)) +
+  geom_line() + 
+  labs(
+       x = "Date",
+       y = "Death rate per 100,000",
+       color = "Region") +
+    scale_x_date(date_breaks = "3 months", date_labels = "%Y-%m")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+plot_1
+
+ggsave(filename = "app_regional_trend_plot.png", plot = plot_1, path = "../plots/", width = 8, height = 6, dpi = 300)
+
+```
+
+**Figure 2**
+
+```         
+Plotting death (as a percent of the total US population)
+```
+
+```{r}
+# Create unique population data for mmwr_week
+dat_2 <- dat %>%
+  select(date,  population, deaths) %>%
+   group_by(date) %>%
+  summarise(population = sum(population),
+            deaths = sum(deaths, na.rm = TRUE),
+            rate = (deaths / population) * 100000) |>
+  ungroup() 
+
+plot_2 <- ggplot(dat_2, aes(date, rate)) +
+  geom_line() +
+  labs(
+    x = "Date",
+    y = "Rate per 100,000"
+  ) +
+scale_x_date(date_breaks = "3 months", date_labels = "%Y-%m") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+plot_2
+
+# Add the waves to the graph
+wave_times <- as.Date(c("2020-03-07", 
+                        "2020-10-01",  
+                        "2021-07-01", 
+                        "2022-04-01" 
+                        ))  
+
+# Define wave labels and their positions on the plot
+wave_labels <- c("Wave 1 ",
+                 "Wave 2 ",
+                 "Wave 3 ", 
+                 "Wave 4 ")
+
+plot_3 <- plot_2 + 
+  geom_vline(xintercept = wave_times, linetype = "dashed", color = "blue") +
+   annotate("text", x = wave_times + 10, # Shift labels 10 days to the right
+           y = max(dat_2$rate) + 0.2, # Place labels below the top limits of the plot
+           label = wave_labels, color = "red", hjust = 0)
+plot_3
+
+
+ggsave(filename = "national_rates.png", plot = plot_3, path = "../plots/", width = 8, height = 6, dpi = 300)
+
+
+```
+
+```         
+As seen in the graph above, the waves represent an increase in the death rates with the start times showing a spike.
+```
+
+1.  For each period compute the deaths rates by state. Describe which states did better or worse during the different periods.
+
+```{r}
+
+# Add the waves to the graph
+wave_cutoffs <- as.Date(c("2020-03-07", 
+                        "2020-10-01",  
+                        "2021-07-01", 
+                        "2022-04-01" 
+                        ))  
+
+waves_dat <- dat %>%
+  mutate(
+    wave = case_when(
+      date >= wave_cutoffs[1] & date < wave_cutoffs[2] ~ "Wave 1",
+      date >= wave_cutoffs[2] & date < wave_cutoffs[3] ~ "Wave 2",
+      date >= wave_cutoffs[3] & date < wave_cutoffs[4] ~ "Wave 3",
+      date >= wave_cutoffs[4]  ~ "Wave 4",
+      TRUE ~ "No Wave"
+    ) ) |>
+  mutate( rate = (deaths / population) * 100000) |>
+  filter(wave != "No Wave")
+```
+
+**Figure 3**
+
+Death rates by week by 100,000 for each state
+
+```{r}
+waves_dat2 <- waves_dat |>
+  filter(wave != "No Wave") |>
+  group_by(state, state_name, wave,region_name) |>
+  summarise( rate = sum(deaths, na.rm = TRUE)/n() /mean(population)*100000 ,
+             n = n(),
+             deaths= sum(deaths,na.rm = TRUE),
+             population= mean(population))   |>
+  ungroup() |>
+  arrange(wave, desc(rate))
+
+state_order_wave3 <- waves_dat2 %>%
+  filter(wave == "Wave 2") %>%
+  arrange(rate) %>%
+  pull(state)
+
+# Reorder the states in the dataset based on this ordered list
+waves_dat3 <- waves_dat2 %>%
+  mutate(state = factor(state, levels = state_order_wave3))
+
+
+waves_heat <- ggplot(waves_dat3, aes(x = wave, y = state, fill = rate)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "rocket", na.value = "gray") +
+  labs(
+    x = "Wave",
+    y = "State",
+    fill = "Death rate\nper week\nper 100,000"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 7))
+waves_heat
+
+ggsave(filename = "waves_heat.png", plot = waves_heat, path = "../plots/", width = 8, height = 6, dpi = 300)
+
+wave_bar <- ggplot(waves_dat2, aes(x = wave, y = rate, fill = wave)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ state) +
+  labs(
+       x = "Wave",
+       y = "Death rate per week per 100,000",
+       fill = "Wave") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+wave_bar
+
+ggsave(filename = "waves_state.png", plot = wave_bar, path = "../plots/", width = 8, height = 6, dpi = 300)
+```
+
+**Supplemental Q2: Comparing Wave by Wave for state**
+
+```{r}
+wave1_region <- ggplot(waves_dat2 |> filter(wave=="Wave 1"), aes(x = reorder(state,rate), y= rate,fill=region_name)) +
+  geom_col() +
+  coord_flip() +  
+  labs(
+       x = "State",
+       y = "Deaths per week per 100,000",
+       fill = "Region") +
+  theme_minimal() 
+
+wave2_region <- ggplot(waves_dat2 |> filter(wave=="Wave 2"), aes(x = reorder(state,rate), y= rate,fill=region_name)) +
+  geom_col() +
+  coord_flip() +  
+  labs(
+       x = "State",
+       y = "Deaths per week per 100,000",
+       fill = "Region") +
+  theme_minimal() 
+
+wave3_region <- ggplot(waves_dat2 |> filter(wave=="Wave 3"), aes(x = reorder(state,rate), y= rate,fill=region_name)) +
+  geom_col() +
+  coord_flip() +  
+  labs(
+       x = "State",
+       y = "Deaths per week per 100,000",
+       fill = "Region") +
+  theme_minimal() 
+
+wave4_region <- ggplot(waves_dat2 |> filter(wave=="Wave 4"), aes(x = reorder(state,rate), y= rate,fill=region_name)) +
+  geom_col() +
+  coord_flip() +  
+  labs(
+       x = "State",
+       y = "Deaths per week per 100,000",
+       fill = "Region") +
+  theme_minimal() 
+
+
+ggsave(filename = "wave1_region.png", plot = wave1_region, path = "../plots/", width = 8, height = 6, dpi = 300)
+ggsave(filename = "wave2_region.png", plot = wave2_region, path = "../plots/", width = 8, height = 6, dpi = 300)
+ggsave(filename = "wave3_region.png", plot = wave3_region, path = "../plots/", width = 8, height = 6, dpi = 300)
+ggsave(filename = "wave4_region.png", plot = wave4_region, path = "../plots/", width = 8, height = 6, dpi = 300)
+
+wave1_region
+wave2_region
+wave3_region
+wave4_region
+```
+
+1.  Describe if COVID-19 became less or more virulent across the different periods.
+
+Table for highest and lowest
+
+```{r}
+
+waves_dat4 <- waves_dat2 |>
+  group_by(wave) |>
+  summarise(
+    Population = sum(population),
+    Deaths = sum(deaths),
+    Weeks = max(n),
+    Mean = round((sum(deaths)/sum(population)/Weeks) *100000,2),
+    Minimum = round(min(rate, na.rm = TRUE),3),
+    Maximum = round(max(rate, na.rm = TRUE),3),
+    Median = round(median(rate, na.rm = TRUE),3),
+    SD = round(sd(rate, na.rm = TRUE),2)
+  ) |>
+  ungroup() |>
+  rename(Wave= wave)
+
+
+saveRDS(waves_dat4, file = "../data/table.rds")
+```
+
+**Supplemental Q3 Plots**
+
+```{r}
+week_box <- ggplot() +
+  geom_boxplot(data = waves_dat, aes(x = date, y = rate, group = date), 
+               fill = "lightblue", color = "black", alpha = 0.5) +
+   
+  labs(
+       x = "Week", y = "Weekly death rate per 100,000") +
+ facet_wrap(~ wave, scales = "free_x") +
+  theme_cowplot() 
+
+
+ggsave(filename = "week_box.png", plot = week_box, path = "../plots/", width = 8, height = 6, dpi = 300)
+
+week_box
+```
+
+```{r}
+sf <- read_sf("../raw_data/cb_2018_us_state_20m/cb_2018_us_state_20m.shp") 
+sf <- st_transform(sf, crs = 2163) 
+joins <- sf |> filter(NAME %in% dat$state_name) |> rename(state_name = NAME)
+
+
+
+joins2 <- left_join(joins, waves_dat2, by = "state_name" )
+
+map <- ggplot(data = joins2) +
+  geom_sf(aes(fill = rate), color = "black", size = 0.1) + 
+  scale_fill_viridis_c(option = "C", na.value = "grey") + 
+  labs(
+       fill = "Death Rate \n(per 100,000)") +
+  theme_cowplot() +
+  facet_wrap(~ wave) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   theme(
+    axis.title.x = element_blank(),  # Remove x-axis title
+    axis.text.x = element_blank(),   # Remove x-axis text
+    axis.ticks.x = element_blank(),  # Remove x-axis ticks
+    axis.title.y = element_blank(),  # Remove y-axis title
+    axis.text.y = element_blank(),   # Remove y-axis text
+    axis.ticks.y = element_blank(),  # Remove y-axis ticks
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.background = element_blank(),  # Remove panel background
+    plot.background = element_blank()    # Remove plot background for a clean slate
+  )
+
+ggsave(filename = "map.png", plot = map, path = "../plots/", width = 8, height = 6, dpi = 300)
+```
